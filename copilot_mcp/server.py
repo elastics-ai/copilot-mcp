@@ -699,8 +699,27 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
                     f"{COPILOT_API_BASE}/models", headers=auth_headers(), timeout=10
                 )
                 resp.raise_for_status()
-                models = [m.get("id") or m.get("name") for m in resp.json().get("data", [])]
-                result = "\n".join(f"- {m}" for m in models if m)
+                raw_models = resp.json().get("data", [])
+
+            # Keep only chat-capable models: filter out embedding models and
+            # deduplicate aliases (prefer the versioned/dated canonical ID).
+            seen_families: dict[str, str] = {}
+            chat_models: list[dict] = []
+            for m in raw_models:
+                mid = m.get("id") or m.get("name", "")
+                caps = m.get("capabilities", {})
+                family = caps.get("family", mid)
+                # Skip embedding models
+                if "embedding" in mid.lower() or "embedding" in family.lower():
+                    continue
+                # For duplicate families keep the first (most specific/versioned) ID
+                if family in seen_families:
+                    continue
+                seen_families[family] = mid
+                chat_models.append({"id": mid, "family": family})
+
+            lines = [f"- {m['id']}" for m in chat_models]
+            result = f"{len(lines)} chat models available:\n" + "\n".join(lines)
 
         elif name == "copilot_chat":
             message = arguments["message"]
